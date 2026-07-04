@@ -1,0 +1,72 @@
+# DO NOT put this file under `.github/workflows/` in THIS (private) repo — it must
+# NOT run here. It is a template that the private repo's deploy workflow copies into
+# the PUBLIC repo (as `.github/workflows/deploy-pages.yml`, shipped inside `out/`).
+#
+# Once it lives in the public repo, it publishes that repo's static files to GitHub
+# Pages using the OFFICIAL GitHub Actions Pages pipeline (upload-pages-artifact +
+# deploy-pages). This replaces the flaky legacy "Deploy from a branch" pipeline that
+# was failing with "Deployment failed, try again later.".
+#
+# The `Setup Pages` step below uses `enablement: true`, so it sets the Pages
+# build source to "GitHub Actions" automatically via the API. You normally do
+# NOT need to touch Settings -> Pages manually. If enablement ever fails
+# (older repos), set it once: Settings -> Pages -> Source: "GitHub Actions".
+name: Deploy static site to Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Grants the in-repo OIDC token the permissions the Pages deploy needs.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; don't cancel an in-progress publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Collect site files (exclude VCS/workflow metadata)
+        # The public repo's root already contains the built site (index.html,
+        # _next/, .nojekyll, ...) because the private repo pushes `out/` here.
+        # Copy everything except .git and .github into ./_site so the uploaded
+        # Pages artifact contains only the static site.
+        run: |
+          mkdir -p _site
+          rsync -a --exclude='.git' --exclude='.github' --exclude='_site' ./ ./_site/
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+        with:
+          # enablement: true makes this step CREATE/UPDATE the Pages site and set
+          # its build source to "GitHub Actions" via the API (using the in-repo
+          # GITHUB_TOKEN, which has `pages: write` above). This is what removes the
+          # dependence on manually flipping Settings -> Pages -> Source, and it
+          # stops the legacy "Deploy from a branch" pipeline that was racing this
+          # one and holding the github-pages environment lock.
+          enablement: true
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # The site lives in a subfolder so we DON'T upload the repo root as-is:
+          # uploading `.` would bundle `.git/` and `.github/` into the artifact.
+          # We copy only the served files into ./_site first (see step above).
+          path: ./_site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
